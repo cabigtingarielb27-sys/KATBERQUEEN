@@ -1,0 +1,66 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Java 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build web assets (www)
+        run: npm run build
+
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Allow saving the database in phone storage
+        run: |
+          node <<'JS'
+          const fs = require('fs');
+          const p = 'android/app/src/main/AndroidManifest.xml';
+          let s = fs.readFileSync(p, 'utf8');
+          const perms = [
+            '<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>',
+            '<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>',
+            '<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>',
+          ];
+          if (!s.includes('MANAGE_EXTERNAL_STORAGE')) s = s.replace('<application', perms.join('\n    ') + '\n\n    <application');
+          if (!s.includes('requestLegacyExternalStorage')) s = s.replace('<application', '<application android:requestLegacyExternalStorage="true"');
+          fs.writeFileSync(p, s);
+          console.log('storage permissions added');
+          JS
+
+      - name: Sync web assets into Android
+        run: npx cap sync android
+
+      - name: Build debug APK
+        run: |
+          cd android
+          chmod +x ./gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: queeny-store-pos-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
